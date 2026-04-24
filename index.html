@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BNYK 3D SNAKE ROOMS</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #111; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+              display: flex; flex-direction: column; align-items: center; justify-content: center;
+              background: rgba(0,0,0,0.8); z-index: 10; }
+        .server-btn { padding: 15px 30px; margin: 5px; cursor: pointer; background: #0f0; border: none; font-weight: bold; }
+        .server-btn:hover { background: #0a0; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1 style="color: #0f0;">BNYK MULTI-SERVER</h1>
+    <input type="text" id="nameInput" placeholder="Твой ник" style="padding: 10px; margin-bottom: 20px;">
+    <div id="server-list"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+
+<script>
+const socket = io('http://localhost:5070'); // Замени на URL своего Render
+let myId, scene, camera, renderer;
+let players = {}, foodMeshes = {};
+
+// ГЕНЕРАЦИЯ МЕНЮ
+const serverList = document.getElementById('server-list');
+for(let i=1; i<=10; i++) {
+    let btn = document.createElement('button');
+    btn.className = 'server-btn';
+    btn.innerText = `SERVER ${i}`;
+    btn.onclick = () => joinServer(i.toString());
+    serverList.appendChild(btn);
+}
+
+function joinServer(room) {
+    const name = document.getElementById('nameInput').value || 'bnyk';
+    document.getElementById('ui').style.display = 'none';
+    initGame();
+    socket.emit('join_server', { room, name });
+}
+
+function initGame() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(0, 10, 10);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x404040));
+    
+    // Сетка пола
+    const grid = new THREE.GridHelper(100, 50, 0x00ff00, 0x222222);
+    scene.add(grid);
+
+    camera.position.y = 15;
+    camera.position.z = 15;
+    camera.lookAt(0,0,0);
+    animate();
+}
+
+socket.on('init', (data) => {
+    myId = data.your_id;
+    // Создаем игроков
+    for(let id in data.players) createPlayer(id, data.players[id]);
+    // Создаем еду
+    data.food.forEach(f => spawnFood(f));
+});
+
+socket.on('new_player', (data) => createPlayer(data.id, data));
+
+socket.on('update', (data) => {
+    if(players[data.id]) {
+        players[data.id].position.set(data.x, 0.5, data.z);
+    }
+});
+
+socket.on('food_update', (data) => {
+    if(foodMeshes[data.eaten]) {
+        scene.remove(foodMeshes[data.eaten]);
+        delete foodMeshes[data.eaten];
+    }
+    spawnFood(data.new);
+});
+
+function createPlayer(id, data) {
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshPhongMaterial({ color: data.color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(data.x, 0.5, data.z);
+    scene.add(mesh);
+    players[id] = mesh;
+}
+
+function spawnFood(f) {
+    const geo = new THREE.SphereGeometry(0.5);
+    const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(f.x, 0.5, f.z);
+    scene.add(mesh);
+    foodMeshes[f.id] = mesh;
+}
+
+// УПРАВЛЕНИЕ
+const keys = {};
+window.onkeydown = (e) => keys[e.key] = true;
+window.onkeyup = (e) => keys[e.key] = false;
+
+function animate() {
+    requestAnimationFrame(animate);
+    if(myId && players[myId]) {
+        if(keys['ArrowLeft']) players[myId].position.x -= 0.2;
+        if(keys['ArrowRight']) players[myId].position.x += 0.2;
+        if(keys['ArrowUp']) players[myId].position.z -= 0.2;
+        if(keys['ArrowDown']) players[myId].position.z += 0.2;
+
+        socket.emit('move', { x: players[myId].position.x, z: players[myId].position.z });
+        
+        camera.position.x = players[myId].position.x;
+        camera.position.z = players[myId].position.z + 15;
+        camera.lookAt(players[myId].position);
+    }
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
